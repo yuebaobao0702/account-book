@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
+import iconv from "iconv-lite";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = join(__dirname, "account_book.db");
 const PORT = 3004;
@@ -20,6 +21,9 @@ function initTables() {
   db.exec("CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('income','expense')), parent_id TEXT DEFAULT NULL, icon TEXT NOT NULL DEFAULT 'circle', color TEXT NOT NULL DEFAULT '#6b7280', sort_order INTEGER NOT NULL DEFAULT 0)");
   db.exec("CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('income','expense')), amount REAL NOT NULL, category_id TEXT NOT NULL, account_id TEXT NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
   db.exec("CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, category_id TEXT NOT NULL, amount REAL NOT NULL, month TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
+  db.exec("CREATE TABLE IF NOT EXISTS stock_holdings (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, shares REAL NOT NULL DEFAULT 0, cost_price REAL NOT NULL DEFAULT 0, market TEXT NOT NULL DEFAULT 'SZ', account_id TEXT NOT NULL DEFAULT 'default', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
+  db.exec("CREATE TABLE IF NOT EXISTS stock_trades (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, trade_type TEXT NOT NULL CHECK(trade_type IN ('buy','sell')), shares REAL NOT NULL, price REAL NOT NULL, amount REAL NOT NULL, commission REAL NOT NULL DEFAULT 0, date TEXT NOT NULL, note TEXT DEFAULT '', account_id TEXT NOT NULL DEFAULT 'default', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
+  db.exec("CREATE TABLE IF NOT EXISTS stock_dividends (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, dividend_per_share REAL NOT NULL, total_amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
 }
 
 function seedData() {
@@ -73,6 +77,104 @@ app.post("/api/auth/verify", (req, res) => {
     res.status(500).json({ error: "验证失败" });
   }
 });
+
+// Serve web frontend (no auth required)
+app.use(express.static(join(__dirname, "dist")));
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  res.sendFile(join(__dirname, "dist", "index.html"));
+});
+
+// ===== Stock Price Fetching =====
+function detectMarket(code) {
+  const c = (code || "").trim();
+  if (c.startsWith("6")) return "SH";
+  return "SZ";
+}
+function parseStockCode(code, market) {
+  const m = (market || detectMarket(code)).toUpperCase();
+  const prefix = m === "SH" ? "sh" : "sz";
+  return prefix + code;
+}
+
+function parseStockResponse(text) {
+  const lines = text.split("\n").filter(l => l.trim());
+  const result = [];
+  for (const line of lines) {
+    const m = line.match(/^v_\w+="([^"]+)"/);
+    if (!m) continue;
+    const parts = m[1].split("~");
+    if (parts.length < 5) continue;
+    result.push({
+      code: parts[2],
+      name: parts[1],
+      price: parseFloat(parts[3]) || 0,
+      change: parseFloat(parts[31]) || 0,
+      changePercent: parseFloat(parts[32]) || 0,
+      high: parseFloat(parts[33]) || 0,
+      low: parseFloat(parts[34]) || 0,
+      volume: parseFloat(parts[36]) || 0,
+      amount: parseFloat(parts[37]) || 0,
+      open: parseFloat(parts[5]) || 0,
+      yesterdayClose: parseFloat(parts[4]) || 0,
+      market: line.startsWith("v_sh") ? "SH" : "SZ",
+    });
+  }
+  return result;
+}
+
+// Fetch real-time price for a single stock
+app.get("/api/stocks/price", async (req, res) => {
+  const { code, market } = req.query;
+  if (!code) return res.status(400).json({ error: "缺少股票代码" });
+  try {
+    const q = parseStockCode(code, market);
+    const buf = await (await fetch(`https://qt.gtimg.cn/q=${q}`)).arrayBuffer();
+    const text = iconv.decode(Buffer.from(buf), "GBK");
+    const parsed = parseStockResponse(text);
+    res.json(parsed[0] || null);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Fetch prices for multiple stocks at once
+app.post("/api/stocks/prices", async (req, res) => {
+  const { codes } = req.body;
+  if (!codes || !Array.isArray(codes) || codes.length === 0) return res.status(400).json({ error: "缺少股票代码列表" });
+  try {
+    const qs = codes.map(c => parseStockCode(c.code, c.market)).join(",");
+    const buf = await (await fetch(`https://qt.gtimg.cn/q=${qs}`)).arrayBuffer();
+    const text = iconv.decode(Buffer.from(buf), "GBK");
+    const parsed = parseStockResponse(text);
+    res.json(parsed);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+
+app.get("/api/stocks/lookup", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).json({ error: "缺少股票代码" });
+  try {
+    const market = detectMarket(code);
+    const prefix = market === "SH" ? "sh" : "sz";
+    const buf = await (await fetch("https://qt.gtimg.cn/q=" + prefix + code)).arrayBuffer();
+    const text = iconv.decode(Buffer.from(buf), "GBK");
+    const parsed = parseStockResponse(text);
+    if (parsed.length > 0 && parsed[0].code) {
+      res.json({ code: parsed[0].code, name: parsed[0].name, market, price: parsed[0].price });
+    } else {
+      res.json({ code, name: "", market, price: 0 });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 
 // Auth middleware for protected endpoints
 app.use((req, res, next) => {
@@ -223,7 +325,243 @@ app.post("/api/import/excel", (req, res) => {
   res.status(501).json({ error: "Excel导入通过web界面暂不支持" });
 });
 
+
+// Stock name lookup (public)
+// ===== Stock API endpoints =====
+
+// Get all holdings
+app.get("/api/stocks/holdings", (req, res) => {
+  const rows = db.prepare(`
+    SELECT h.*,
+      COALESCE((SELECT SUM(CASE WHEN trade_type='buy' THEN amount ELSE -amount END) FROM stock_trades WHERE stock_code=h.stock_code), 0) as total_invested
+    FROM stock_holdings h ORDER BY h.shares * h.cost_price DESC
+  `).all();
+  res.json(rows);
+});
+
+// Add holding
+app.post("/api/stocks/holdings", (req, res) => {
+  const d = req.body;
+  if (!d.id || !d.stock_code || !d.stock_name || d.shares == null || d.cost_price == null) {
+    return res.status(400).json({ error: "缺少必要字段" });
+  }
+  db.prepare("INSERT INTO stock_holdings (id,stock_code,stock_name,shares,cost_price,market,account_id) VALUES (?,?,?,?,?,?,?)").run(
+    d.id, d.stock_code, d.stock_name, d.shares, d.cost_price, d.market || detectMarket(d.stock_code), d.account_id || "default"
+  );
+  res.json({ ok: true });
+});
+
+// Update holding
+app.put("/api/stocks/holdings/:id", (req, res) => {
+  const d = req.body;
+  db.prepare("UPDATE stock_holdings SET stock_code=?,stock_name=?,shares=?,cost_price=?,market=?,updated_at=datetime('now','localtime') WHERE id=?").run(
+    d.stock_code, d.stock_name, d.shares, d.cost_price, d.market, req.params.id
+  );
+  res.json({ ok: true });
+});
+
+// Delete holding
+app.delete("/api/stocks/holdings/:id", (req, res) => {
+  db.prepare("DELETE FROM stock_holdings WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Get trades for a stock
+app.get("/api/stocks/trades", (req, res) => {
+  const { stock_code } = req.query;
+  let rows;
+  if (stock_code) {
+    rows = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date DESC").all(stock_code);
+  } else {
+    rows = db.prepare("SELECT * FROM stock_trades ORDER BY date DESC LIMIT 100").all();
+  }
+  res.json(rows);
+});
+
+// Add trade
+app.post("/api/stocks/trades", (req, res) => {
+  const d = req.body;
+  if (!d.id || !d.stock_code || !d.stock_name || !d.trade_type || !d.shares || !d.price || !d.date) {
+    return res.status(400).json({ error: "缺少必要字段" });
+  }
+  const amount = d.shares * d.price;
+  db.prepare("INSERT INTO stock_trades (id,stock_code,stock_name,trade_type,shares,price,amount,commission,date,note,account_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+    d.id, d.stock_code, d.stock_name, d.trade_type, d.shares, d.price, amount,
+    d.commission || 0, d.date, d.note || "", d.account_id || "default"
+  );
+  // Update holding shares and cost
+  const holding = db.prepare("SELECT * FROM stock_holdings WHERE stock_code=?").get(d.stock_code);
+  if (holding) {
+    if (d.trade_type === "buy") {
+      const totalShares = holding.shares + d.shares;
+      const totalCost = (holding.shares * holding.cost_price) + amount + (d.commission || 0);
+      const avgCost = totalCost / totalShares;
+      db.prepare("UPDATE stock_holdings SET shares=?,cost_price=?,updated_at=datetime('now','localtime') WHERE id=?").run(
+        totalShares, avgCost, holding.id
+      );
+    } else {
+      const newShares = holding.shares - d.shares;
+      if (newShares <= 0) {
+        db.prepare("DELETE FROM stock_holdings WHERE id=?").run(holding.id);
+      } else {
+        const remainingCost = Math.max(0, holding.shares * holding.cost_price - amount);
+        const avgCost = remainingCost / newShares;
+        db.prepare("UPDATE stock_holdings SET shares=?,cost_price=?,updated_at=datetime('now','localtime') WHERE id=?").run(
+          newShares, avgCost, holding.id
+        );
+      }
+    }
+  } else if (d.trade_type === "buy") {
+    const hid = uuidv4();
+    db.prepare("INSERT INTO stock_holdings (id,stock_code,stock_name,shares,cost_price,market,account_id) VALUES (?,?,?,?,?,?,?)").run(
+      hid, d.stock_code, d.stock_name, d.shares, (amount + (d.commission || 0)) / d.shares, d.market || detectMarket(d.stock_code), d.account_id || "default"
+    );
+  }
+  res.json({ ok: true });
+});
+
+// Delete trade
+app.delete("/api/stocks/trades/:id", (req, res) => {
+  db.prepare("DELETE FROM stock_trades WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Get dividends
+app.get("/api/stocks/dividends", (req, res) => {
+  const { stock_code } = req.query;
+  let rows;
+  if (stock_code) {
+    rows = db.prepare("SELECT * FROM stock_dividends WHERE stock_code=? ORDER BY date DESC").all(stock_code);
+  } else {
+    rows = db.prepare("SELECT * FROM stock_dividends ORDER BY date DESC LIMIT 100").all();
+  }
+  res.json(rows);
+});
+
+// Add dividend
+app.post("/api/stocks/dividends", (req, res) => {
+  const d = req.body;
+  if (!d.id || !d.stock_code || !d.stock_name || !d.dividend_per_share || !d.total_amount || !d.date) {
+    return res.status(400).json({ error: "缺少必要字段" });
+  }
+  db.prepare("INSERT INTO stock_dividends (id,stock_code,stock_name,dividend_per_share,total_amount,date,note) VALUES (?,?,?,?,?,?,?)").run(
+    d.id, d.stock_code, d.stock_name, d.dividend_per_share, d.total_amount, d.date, d.note || ""
+  );
+  res.json({ ok: true });
+});
+
+// Delete dividend
+app.delete("/api/stocks/dividends/:id", (req, res) => {
+  db.prepare("DELETE FROM stock_dividends WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Completed positions (realized P&L)
+app.get("/api/stocks/completed", (req, res) => {
+  const group = req.query.group || "stock";
+  let result = [];
+
+  if (group === "cycle") {
+    // Per-cycle view: split trades into individual buy-sell cycles
+    const codes = db.prepare("SELECT stock_code,stock_name,SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) as net FROM stock_trades GROUP BY stock_code HAVING net <= 0").all();
+    for (const { stock_code, stock_name } of codes) {
+      const trades = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date ASC, created_at ASC").all(stock_code);
+      let sharesHeld = 0, costBasis = 0;
+      let cycleBuys = [], cycleSells = [], cycleCommissions = [];
+      let cycleStart = "", cycleEnd = "";
+
+      for (const t of trades) {
+        if (t.trade_type === "buy") {
+          sharesHeld += t.shares;
+          costBasis += t.amount;
+          cycleBuys.push(t);
+          if (!cycleStart) cycleStart = t.date;
+        } else {
+          cycleSells.push(t);
+          sharesHeld -= t.shares;
+          cycleEnd = t.date;
+        }
+        cycleCommissions.push(t.commission || 0);
+
+        if (sharesHeld <= 0 && cycleBuys.length > 0) {
+          const totalBuy = cycleBuys.reduce((s, x) => s + x.amount, 0);
+          const totalSell = cycleSells.reduce((s, x) => s + x.amount, 0);
+          const totalComm = cycleCommissions.reduce((s, x) => s + x, 0);
+          const realizedPnl = totalSell - totalBuy - totalComm;
+          result.push({
+            stock_code, stock_name,
+            total_buy: totalBuy, total_sell: totalSell, total_commission: totalComm,
+            trade_count: cycleBuys.length + cycleSells.length,
+            first_trade: cycleStart || "", last_trade: cycleEnd || "",
+            realized_pnl: realizedPnl,
+            realized_pnl_percent: totalBuy > 0 ? (realizedPnl / totalBuy) * 100 : 0,
+            holding_days: cycleStart && cycleEnd ? Math.max(1, Math.round((new Date(cycleEnd) - new Date(cycleStart)) / (1000 * 60 * 60 * 24))) : 0,
+          });
+          sharesHeld = 0; costBasis = 0; cycleBuys = []; cycleSells = []; cycleCommissions = [];
+          cycleStart = ""; cycleEnd = "";
+        }
+      }
+    }
+    result.sort((a, b) => b.last_trade.localeCompare(a.last_trade));
+  } else {
+    // Stock-grouped view
+    const rows = db.prepare(`
+      SELECT stock_code,stock_name,
+        SUM(CASE WHEN trade_type='buy' THEN shares ELSE 0 END) as total_buy_shares,
+        SUM(CASE WHEN trade_type='sell' THEN shares ELSE 0 END) as total_sell_shares,
+        SUM(CASE WHEN trade_type='buy' THEN amount ELSE 0 END) as total_buy,
+        SUM(CASE WHEN trade_type='sell' THEN amount ELSE 0 END) as total_sell,
+        SUM(commission) as total_commission,
+        COUNT(*) as trade_count,
+        MIN(date) as first_trade,
+        MAX(date) as last_trade
+      FROM stock_trades
+      GROUP BY stock_code
+      HAVING SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) <= 0
+      ORDER BY last_trade DESC
+    `).all();
+    result = rows.map(r => ({
+      ...r,
+      realized_pnl: r.total_sell - r.total_buy - r.total_commission,
+      realized_pnl_percent: r.total_buy > 0 ? ((r.total_sell - r.total_buy - r.total_commission) / r.total_buy) * 100 : 0,
+      holding_days: Math.max(1, Math.round((new Date(r.last_trade) - new Date(r.first_trade)) / (1000 * 60 * 60 * 24))),
+    }));
+  }
+
+  const summary = {
+    totalRealizedPnl: result.reduce((s, r) => s + r.realized_pnl, 0),
+    totalBuy: result.reduce((s, r) => s + r.total_buy, 0),
+    totalSell: result.reduce((s, r) => s + r.total_sell, 0),
+    totalCommission: result.reduce((s, r) => s + r.total_commission, 0),
+    count: result.length,
+  };
+  res.json({ positions: result, summary, group });
+});
+
+// Portfolio summary// Portfolio summary
+app.get("/api/stocks/portfolio", (req, res) => {
+  const holdings = db.prepare(`
+    SELECT h.*, COALESCE((SELECT SUM(CASE WHEN trade_type='buy' THEN amount ELSE -amount END) FROM stock_trades WHERE stock_code=h.stock_code), h.shares * h.cost_price) as total_invested
+    FROM stock_holdings h ORDER BY h.shares * h.cost_price DESC
+  `).all();
+  const totalInvested = holdings.reduce((s, h) => s + (h.shares * h.cost_price), 0);
+  const totalDividends = db.prepare("SELECT COALESCE(SUM(total_amount),0) as total FROM stock_dividends").get().total;
+  const completed = db.prepare("SELECT stock_code,SUM(CASE WHEN trade_type='buy' THEN amount ELSE 0 END) as tb,SUM(CASE WHEN trade_type='sell' THEN amount ELSE 0 END) as ts,SUM(commission) as tc FROM stock_trades WHERE stock_code NOT IN (SELECT stock_code FROM stock_holdings) GROUP BY stock_code").all();
+  const totalRealizedPnl = completed.reduce((s, c) => s + (c.ts - c.tb - c.tc), 0);
+  res.json({
+    holdings,
+    totalInvested,
+    totalDividends,
+    holdingCount: holdings.length,
+  });
+});
+
 // Serve built frontend
+app.use(express.static(join(__dirname, "dist")));
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  res.sendFile(join(__dirname, "dist", "index.html"));
+});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("account book api running on port " + PORT);

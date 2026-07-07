@@ -8,6 +8,7 @@ import { CategoriesPage } from "./pages/CategoriesPage";
 import { BudgetsPage } from "./pages/BudgetsPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { StockPage } from "./pages/StockPage";
 
 function App() {
   const [unlocked, setUnlocked] = useState(false);
@@ -25,6 +26,7 @@ function App() {
         <Route path="/budgets" element={<BudgetsPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/stocks" element={<StockPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

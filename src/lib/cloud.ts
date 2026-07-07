@@ -185,3 +185,88 @@ export async function setBudget(data: any) {
 export async function deleteBudget(id: string) {
   return api(`/api/budgets/${id}`, { method: "DELETE" });
 }
+
+
+// ===== Stock API =====
+
+// Stock Holdings
+export async function getStockHoldings() {
+  return api("/api/stocks/holdings");
+}
+
+export async function addStockHolding(holding: any) {
+  return api("/api/stocks/holdings", {
+    method: "POST",
+    body: JSON.stringify(holding),
+  });
+}
+
+export async function updateStockHolding(id: string, data: any) {
+  return api(`/api/stocks/holdings/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteStockHolding(id: string) {
+  return api(`/api/stocks/holdings/${id}`, { method: "DELETE" });
+}
+
+// Stock Trades
+export async function getStockTrades(stockCode?: string) {
+  const q = stockCode ? `?stock_code=${stockCode}` : "";
+  return api(`/api/stocks/trades${q}`);
+}
+
+export async function addStockTrade(trade: any) {
+  return api("/api/stocks/trades", {
+    method: "POST",
+    body: JSON.stringify(trade),
+  });
+}
+
+export async function deleteStockTrade(id: string) {
+  return api(`/api/stocks/trades/${id}`, { method: "DELETE" });
+}
+
+// Stock Dividends
+export async function getStockDividends(stockCode?: string) {
+  const q = stockCode ? `?stock_code=${stockCode}` : "";
+  return api(`/api/stocks/dividends${q}`);
+}
+
+export async function addStockDividend(dividend: any) {
+  return api("/api/stocks/dividends", {
+    method: "POST",
+    body: JSON.stringify(dividend),
+  });
+}
+
+export async function deleteStockDividend(id: string) {
+  return api(`/api/stocks/dividends/${id}`, { method: "DELETE" });
+}
+
+// Stock Prices
+export async function fetchStockPrice(code: string, market?: string) {
+  return api(`/api/stocks/price?code=${code}&market=${market || "SZ"}`);
+}
+
+export async function fetchStockPrices(codes: Array<{code: string; market?: string}>) {
+  return api("/api/stocks/prices", {
+    method: "POST",
+    body: JSON.stringify({ codes }),
+  });
+}
+
+// Portfolio Summary
+export async function lookupStock(code: string, market?: string) {
+  return api(`/api/stocks/lookup?code=${code}&market=${market || ""}`);
+}
+
+export async function getStockCompleted(group = "stock") {
+  return api(`/api/stocks/completed?group=${group}`);
+}
+
+export async function getStockPortfolio() {
+  return api("/api/stocks/portfolio");
+}
