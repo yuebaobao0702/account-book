@@ -205,6 +205,14 @@ app.get("/api/stats/categories", (req, res) => {
   res.json(db.prepare("SELECT c.id,c.name,c.icon,c.color,c.type,c.parent_id,SUM(t.amount) as total FROM transactions t LEFT JOIN categories c ON t.category_id=c.id WHERE t.date LIKE ? GROUP BY t.category_id ORDER BY total DESC").all(ms + "%"));
 });
 
+// Daily income/expense for a month
+app.get("/api/stats/daily", (req, res) => {
+  const { year, month } = req.query;
+  const ms = year + "-" + String(month).padStart(2, "0");
+  const rows = db.prepare("SELECT date,SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as income,SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense FROM transactions WHERE date LIKE ? GROUP BY date ORDER BY date ASC").all(ms + "%");
+  res.json(rows);
+});
+
 app.get("/api/stats/trend", (req, res) => {
   res.json(db.prepare("SELECT substr(date,1,7) as month,SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as income,SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expense FROM transactions GROUP BY substr(date,1,7) ORDER BY month DESC LIMIT 12").all());
 });

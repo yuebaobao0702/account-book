@@ -86,6 +86,10 @@ export async function getCategorySummary(year: number, month: number) {
   return api(`/api/stats/categories?year=${year}&month=${month}`);
 }
 
+export async function getDailyStats(year: number, month: number) {
+  return api(`/api/stats/daily?year=${year}&month=${month}`);
+}
+
 export async function getMonthlyTrend() {
   return api("/api/stats/trend");
 }

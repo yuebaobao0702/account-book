@@ -15,12 +15,12 @@ import {
   Line,
   XAxis,
   YAxis,
-  CartesianGrid,
+  CartesianGrid, BarChart, Bar,
 } from "recharts";
 import {
   getMonthlyStats,
   getCategorySummary,
-  getMonthlyTrend,
+  getMonthlyTrend, getDailyStats,
 } from "../lib/cloud";
 import { formatAmount } from "../lib/utils";
 
@@ -35,6 +35,7 @@ export function DashboardPage() {
   const [stats, setStats] = useState({ income: 0, expense: 0, balance: 0 });
   const [catSummary, setCatSummary] = useState<any[]>([]);
   const [trend, setTrend] = useState<any[]>([]);
+  const [daily, setDaily] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,14 +45,16 @@ export function DashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [s, c, t] = await Promise.all([
+      const [s, c, t, d] = await Promise.all([
         getMonthlyStats(year, month),
         getCategorySummary(year, month),
         getMonthlyTrend(),
+        getDailyStats(year, month),
       ]);
       setStats(s as { income: number; expense: number; balance: number });
       setCatSummary((c as any[]).filter((x: any) => x.type === "expense"));
       setTrend(t as any[]);
+      setDaily(d as any[]);
     } catch (e) {
       console.error(e);
     }
@@ -185,7 +188,32 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Trend Chart */}
+        {/* Daily Income/Expense Chart */}
+        <div className="bg-white rounded-xl p-5 border shadow-sm">
+          <h3 className="font-semibold mb-4">每日收支</h3>
+          {daily.length > 0 ? (
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={daily}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.substring(8)} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  formatter={(value: any, name: any) => {
+                    if (name === "income") return [formatAmount(value), "收入"];
+                    return [formatAmount(value), "支出"];
+                  }}
+                  labelFormatter={(label) => label}
+                />
+                <Bar dataKey="income" name="income" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expense" name="expense" fill="#ef4444" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+              本月暂无数据
+            </div>
+          )}
+        </div>        {/* Trend Chart */}
         <div className="bg-white rounded-xl p-5 border shadow-sm">
           <h3 className="font-semibold mb-4">月度趋势</h3>
           {trend.length > 0 ? (
@@ -221,6 +249,8 @@ export function DashboardPage() {
             </div>
           )}
         </div>
+
+
       </div>
     </div>
   );
