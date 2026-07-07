@@ -267,7 +267,7 @@ export async function getDailyAssets() {
   return api("/api/stocks/daily-assets");
 }
 
-export async function recordDailyAssets(data: { totalAssets: number; marketValue: number; cashBalance: number }) {
+export async function recordDailyAssets(data: { date?: string; totalAssets: number; marketValue: number; cashBalance: number }) {
   return api("/api/stocks/daily-assets", {
     method: "POST",
     body: JSON.stringify(data),

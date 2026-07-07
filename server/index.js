@@ -564,12 +564,29 @@ app.get("/api/stocks/completed", (req, res) => {
     }));
   }
 
+  // Always calculate summary from cycle detection (matches time view)
+  const codes4summary = db.prepare("SELECT DISTINCT stock_code FROM stock_trades").all();
+  let sumPnl = 0, sumBuy = 0, sumSell = 0, sumComm = 0, sumCount = 0;
+  for (const { stock_code } of codes4summary) {
+    const trades = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date ASC, created_at ASC").all(stock_code);
+    let sH=0,cBuys=[],cSells=[],cComms=[];
+    for (const t of trades) {
+      if (t.trade_type==="buy"){sH+=t.shares;cBuys.push(t)}
+      else{cSells.push(t);sH-=t.shares}
+      cComms.push(t.commission||0);
+      if (sH<=0&&cBuys.length>0){
+        const tb=cBuys.reduce((s,x)=>s+x.amount,0),ts=cSells.reduce((s,x)=>s+x.amount,0),tc=cComms.reduce((s,x)=>s+x,0);
+        sumPnl+=ts-tb-tc; sumBuy+=tb; sumSell+=ts; sumComm+=tc; sumCount++;
+        sH=0;cBuys=[];cSells=[];cComms=[]
+      }
+    }
+  }
   const summary = {
-    totalRealizedPnl: result.reduce((s, r) => s + r.realized_pnl, 0),
-    totalBuy: result.reduce((s, r) => s + r.total_buy, 0),
-    totalSell: result.reduce((s, r) => s + r.total_sell, 0),
-    totalCommission: result.reduce((s, r) => s + r.total_commission, 0),
-    count: result.length,
+    totalRealizedPnl: sumPnl,
+    totalBuy: sumBuy,
+    totalSell: sumSell,
+    totalCommission: sumComm,
+    count: sumCount,
   };
   res.json({ positions: result, summary, group });
 });
@@ -583,9 +600,10 @@ app.get("/api/stocks/daily-assets", (req, res) => {
 
 // Record today's assets snapshot (called from frontend)
 app.post("/api/stocks/daily-assets", (req, res) => {
-  const { totalAssets, marketValue, cashBalance } = req.body;
-  const today = new Date().toISOString().substring(0, 10);
-  db.prepare("INSERT OR REPLACE INTO daily_assets (date,total_assets,market_value,cash_balance) VALUES (?,?,?,?)").run(today, totalAssets || 0, marketValue || 0, cashBalance || 0);
+  const { date, totalAssets, marketValue, cashBalance } = req.body;
+  const recordDate = date || new Date().toISOString().substring(0, 10);
+  if (!recordDate) return res.status(400).json({ error: "缺少日期" });
+  db.prepare("INSERT OR REPLACE INTO daily_assets (date,total_assets,market_value,cash_balance) VALUES (?,?,?,?)").run(recordDate, totalAssets || 0, marketValue || 0, cashBalance || 0);
   res.json({ ok: true });
 });
 

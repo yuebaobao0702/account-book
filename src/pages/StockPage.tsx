@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   TrendingUp, TrendingDown, RefreshCw, Plus, Trash2, DollarSign, ArrowUpDown,
   PieChart, BarChart3, Wallet,
@@ -17,10 +17,10 @@ import {
   addStockHolding, deleteStockHolding,
   getStockTrades, addStockTrade, deleteStockTrade,
   getStockDividends, addStockDividend, deleteStockDividend,
-  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash, getStockMonthly, getDailyAssets, recordDailyAssets,
+  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash, getDailyAssets, recordDailyAssets,
 } from "../lib/cloud";
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { formatAmount, uuid } from "../lib/utils";
 
@@ -119,8 +119,10 @@ export function StockPage() {
   const [completedData, setCompletedData] = useState<any>(null);
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [cashDialogOpen, setCashDialogOpen] = useState(false);
-  const [monthlyData, setMonthlyData] = useState<any[]>([]);
   const [dailyAssets, setDailyAssets] = useState<any[]>([]);
+  const [recordDate, setRecordDate] = useState("");
+  const [recordAmount, setRecordAmount] = useState("");
+  const [assetPage, setAssetPage] = useState(0);
   const [cashInput, setCashInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -153,13 +155,12 @@ export function StockPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pf, ts, ds, cp, ca, md, da] = await Promise.all([
+      const [pf, ts, ds, cp, ca, da] = await Promise.all([
         getStockPortfolio(),
         getStockTrades(),
         getStockDividends(),
         getStockCompleted(completedGroup === "time" ? "cycle" : "stock"),
         getStockCash(),
-        getStockMonthly(),
         getDailyAssets(),
       ]);
       setHoldings(pf.holdings || []);
@@ -167,7 +168,6 @@ export function StockPage() {
       setDividends(ds);
       setCompletedData(cp);
       setCashBalance(ca?.cash || 0);
-      setMonthlyData(md || []);
       setDailyAssets(da || []);
     } catch (e) {
       console.error("Failed to load stock data:", e);
@@ -308,6 +308,34 @@ export function StockPage() {
   const totalMarketValue = holdings.reduce((s, h) => s + (h.marketValue || h.shares * h.cost_price || 0), 0);
   const totalPnl = totalMarketValue - totalCost;
   const totalRealizedPnl = completedData?.summary?.totalRealizedPnl || 0;
+
+  // Generate benchmark line: 7月1日1万, 每日0.19%复利
+  function dateStrAdd(dateStr: string, days: number): string {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(y, m - 1, d + days);
+    return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+  }
+  function daysBetween(a: string, b: string): number {
+    const [ay, am, ad] = a.split("-").map(Number);
+    const [by, bm, bd] = b.split("-").map(Number);
+    return Math.round((new Date(ay, am - 1, ad).getTime() - new Date(by, bm - 1, bd).getTime()) / (1000 * 60 * 60 * 24));
+  }
+  const chartData = useMemo(() => {
+    if (dailyAssets.length === 0) return [];
+    const sorted = [...dailyAssets].sort((a: any, b: any) => a.date.localeCompare(b.date));
+    const startDate = sorted[0].date;
+    const endDate = sorted[sorted.length - 1].date;
+    const data: any[] = [];
+    let cur = startDate;
+    while (cur <= endDate) {
+      const daysFromStart = daysBetween(cur, "2026-07-01");
+      const benchmark = 10000 * Math.pow(1 + 0.0019, Math.max(0, daysFromStart));
+      const asset = sorted.find((a: any) => a.date === cur);
+      data.push({ date: cur, total_assets: asset?.total_assets || null, benchmark: Math.round(benchmark * 100) / 100 });
+      cur = dateStrAdd(cur, 1);
+    }
+    return data;
+  }, [dailyAssets]);
 
   if (loading) {
     return (
@@ -584,7 +612,6 @@ export function StockPage() {
           <TabsTrigger value="allTrades">交易记录</TabsTrigger>
           <TabsTrigger value="allDividends">分红记录</TabsTrigger>
           <TabsTrigger value="completed">已完成</TabsTrigger>
-          <TabsTrigger value="monthly">月度收益</TabsTrigger>
           <TabsTrigger value="trend">资产趋势</TabsTrigger>
           {selectedStock && <TabsTrigger value="detail">{(holdings.find(h => h.stock_code === selectedStock)?.stock_name || selectedStock)}详情</TabsTrigger>}
         </TabsList>
@@ -987,70 +1014,89 @@ export function StockPage() {
           })()}
         </TabsContent>
         <TabsContent value="trend">
-          <div className="bg-white rounded-xl border shadow-sm p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">每日总资产</h3>
-              <Button size="sm" variant="outline" onClick={async () => {
-                try { await recordDailyAssets({ totalAssets: totalMarketValue + cashBalance, marketValue: totalMarketValue, cashBalance }); setDailyAssets([...dailyAssets, { date: new Date().toISOString().substring(0, 10), total_assets: totalMarketValue + cashBalance, market_value: totalMarketValue, cash_balance: cashBalance }]); } catch {}
-              }}>记录快照</Button>
+          <div className="bg-white rounded-xl border shadow-sm p-5 mb-4">
+            <h3 className="font-semibold mb-4">录入总资产</h3>
+            <div className="flex items-end gap-3">
+              <div className="space-y-1.5">
+                <Label>日期</Label>
+                <Input type="date" value={recordDate} onChange={(e) => setRecordDate(e.target.value)} className="w-40" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>总资产（元）</Label>
+                <Input type="number" step="0.01" placeholder="0.00" value={recordAmount} onChange={(e) => setRecordAmount(e.target.value)} className="w-40" />
+              </div>
+              <Button onClick={async () => {
+                const v = parseFloat(recordAmount);
+                if (!recordDate || isNaN(v)) return;
+                try {
+                  await recordDailyAssets({ date: recordDate, totalAssets: v, marketValue: v, cashBalance: 0 });
+                  setDailyAssets([...dailyAssets.filter((d: any) => d.date !== recordDate), { date: recordDate, total_assets: v, market_value: v, cash_balance: 0 }].sort((a, b) => a.date.localeCompare(b.date)));
+                  setRecordDate(""); setRecordAmount("");
+                } catch {}
+              }}>保存</Button>
             </div>
-            {dailyAssets.length < 2 ? (
+          </div>
+          <div className="bg-white rounded-xl border shadow-sm p-5">
+            <h3 className="font-semibold mb-4">资产趋势</h3>
+            {dailyAssets.length === 0 ? (
               <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-                暂无足够数据，先刷新行情或点击"记录快照"
+                暂无记录，填写上方表单录入
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={dailyAssets}>
+                <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => "¥" + (v / 10000).toFixed(1) + "w"} domain={["auto", "auto"]} />
-                  <Tooltip formatter={(value: any) => ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 })]} />
-                  <Line type="monotone" dataKey="total_assets" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="总资产" />
-                  <Line type="monotone" dataKey="market_value" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="持仓市值" />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => "¥" + v.toLocaleString()} domain={["auto", "auto"]} />
+                  <Tooltip formatter={(value: any, name: any) => {
+                    if (name === "benchmark") return ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 }), "基准线(0.19%/日)"];
+                    return ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 }), "总资产"];
+                  }} />
+                  <Line type="monotone" dataKey="total_assets" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="总资产" connectNulls={false} />
+                  <Line type="monotone" dataKey="benchmark" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="benchmark" />
                 </LineChart>
               </ResponsiveContainer>
             )}
+            {dailyAssets.length > 0 && (() => {
+              const sorted = [...dailyAssets].sort((a: any, b: any) => b.date.localeCompare(a.date));
+              const totalPages = Math.ceil(sorted.length / 10);
+              const page = Math.min(assetPage, totalPages - 1);
+              const paged = sorted.slice(page * 10, (page + 1) * 10);
+              return (
+              <div className="mt-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">日期</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">总资产</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paged.map((d: any) => (
+                        <tr key={d.date} className="border-b last:border-0">
+                          <td className="px-3 py-2">{d.date}</td>
+                          <td className="px-3 py-2 text-right font-medium">{formatAmount(d.total_assets)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-3 text-sm">
+                    <span className="text-muted-foreground">共 {sorted.length} 条</span>
+                    <div className="flex items-center gap-2">
+                      <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-30" disabled={page === 0} onClick={() => setAssetPage(page - 1)}>上一页</button>
+                      <span className="text-muted-foreground">{page + 1}/{totalPages}</span>
+                      <button className="px-2 py-1 rounded border hover:bg-gray-50 disabled:opacity-30" disabled={page >= totalPages - 1} onClick={() => setAssetPage(page + 1)}>下一页</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );})()}
           </div>
         </TabsContent>
 
-        <TabsContent value="monthly">
-          <div className="bg-white rounded-xl border shadow-sm p-5">
-            <h3 className="font-semibold mb-4">月度收益</h3>
-            {monthlyData.length === 0 ? (
-              <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-                暂无已完成交易的月度数据
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => "¥" + v.toLocaleString()} />
-                  <Tooltip
-                    formatter={(value: any) => ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 }), "收益"]}
-                    labelFormatter={(label) => label + "月"}
-                  />
-                  <Bar dataKey="pnl" name="收益" radius={[4, 4, 0, 0]}
-                    shape={(props: any) => {
-                      const { x, y, width, height, payload } = props;
-                      return <rect x={x} y={y} width={width} height={height >= 0 ? height : 0} fill={payload.pnl >= 0 ? "#ef4444" : "#22c55e"} rx={4} />;
-                    }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-            {monthlyData.map((m: any) => (
-              <div key={m.month} className="bg-white rounded-xl border shadow-sm p-4">
-                <p className="text-xs text-muted-foreground mb-1">{m.month}</p>
-                <p className={"text-sm font-bold " + (m.pnl >= 0 ? "text-red-500" : "text-emerald-600")}>
-                  {m.count}笔 {formatPnl(m.pnl)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
       </Tabs>
       {/* Cash Balance Dialog */}
       <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
