@@ -23,7 +23,7 @@ import {
   deleteBudget,
   getCategories,
 } from "../lib/cloud";
-import { formatAmount } from "../lib/utils";
+import { uuid, formatAmount } from "../lib/utils";
 
 interface OutletContext {
   year: number;
@@ -88,7 +88,7 @@ export function BudgetsPage() {
     if (!budgetCategory || !budgetAmount) return;
     try {
       await setBudget({
-        id: editing?.id || crypto.randomUUID(),
+        id: editing?.id || uuid(),
         category_id: budgetCategory,
         amount: parseFloat(budgetAmount),
         month: monthStr,

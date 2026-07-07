@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import * as XLSX from "xlsx";
+import { uuid } from "./utils";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
@@ -288,7 +289,7 @@ export async function importCSV() {
     const note = fields[6] || "";
     await d.execute(
       "INSERT INTO transactions (id, type, amount, category_id, account_id, date, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [crypto.randomUUID(), type, amount, categoryId, accountId, date, note]
+      [uuid(), type, amount, categoryId, accountId, date, note]
     );
     const sign = type === "income" ? 1 : -1;
     await d.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", [sign * amount, accountId]);
@@ -358,7 +359,7 @@ export async function importExcel() {
     const note = String(row["\u5907\u6ce8"] || "");
     await d.execute(
       "INSERT INTO transactions (id, type, amount, category_id, account_id, date, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [crypto.randomUUID(), type, amount, categoryId, accountId, date, note]
+      [uuid(), type, amount, categoryId, accountId, date, note]
     );
     const sign = type === "income" ? 1 : -1;
     await d.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", [sign * amount, accountId]);

@@ -140,7 +140,18 @@ export function DashboardPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: any) => [formatAmount(value), "金额"]}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0].payload;
+                      const total = catSummary.reduce((s: number, c: any) => s + c.total, 0);
+                      const pct = total > 0 ? ((d.total / total) * 100).toFixed(1) : 0;
+                      return (
+                        <div className="bg-white border rounded-lg shadow-lg px-3 py-2 text-sm">
+                          <p className="font-medium">{d.name || d.parent_name || "未分类"}</p>
+                          <p className="text-muted-foreground">{formatAmount(d.total)} ({pct}%)</p>
+                        </div>
+                      );
+                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>

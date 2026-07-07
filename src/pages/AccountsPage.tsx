@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "../components/ui/select";
 import { getAccounts, addAccount, updateAccount, deleteAccount } from "../lib/cloud";
-import { formatAmount } from "../lib/utils";
+import { uuid, formatAmount } from "../lib/utils";
 
 const accountTypes = [
   { value: "cash", label: "现金", icon: Banknote },
@@ -29,6 +29,7 @@ export function AccountsPage() {
   const [accName, setAccName] = useState("");
   const [accType, setAccType] = useState("cash");
   const [accBalance, setAccBalance] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => { loadData(); }, []);
 
@@ -46,6 +47,7 @@ export function AccountsPage() {
     setAccType("cash");
     setAccBalance("");
     setEditing(null);
+    setErrorMsg("");
   };
 
   const openAdd = () => {
@@ -68,7 +70,7 @@ export function AccountsPage() {
         await updateAccount(editing.id, { name: accName, type: accType });
       } else {
         await addAccount({
-          id: crypto.randomUUID(),
+          id: uuid(),
           name: accName,
           type: accType,
           balance: parseFloat(accBalance) || 0,
@@ -76,7 +78,7 @@ export function AccountsPage() {
       }
       setDialogOpen(false);
       loadData();
-    } catch (e) { console.error(e); }
+    } catch (e: any) { setErrorMsg(e?.toString() || "添加失败"); }
   };
 
   const handleDelete = async (id: string, name: string) => {
@@ -185,6 +187,10 @@ export function AccountsPage() {
                   onChange={(e) => setAccBalance(e.target.value)}
                 />
               </div>
+            )}
+
+            {errorMsg && (
+              <p className="text-sm text-red-500 text-center">{errorMsg}</p>
             )}
 
             <div className="flex justify-end gap-2 pt-2">

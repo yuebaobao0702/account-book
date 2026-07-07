@@ -96,7 +96,7 @@ async function initTables() {
     "SELECT COUNT(*) as count FROM categories"
   );
   if (catCount[0].count === 0) {
-    const uuid = () => crypto.randomUUID();
+    const genUuid = () => crypto.randomUUID();
 
     // Expense parent categories
     const expenseParents: Record<string, string> = {};
@@ -114,7 +114,7 @@ async function initTables() {
     ];
     for (let i = 0; i < expenseCatDefs.length; i++) {
       const c = expenseCatDefs[i];
-      const id = uuid();
+      const id = genUuid();
       expenseParents[c.name] = id;
       await db.execute(
         "INSERT INTO categories (id, name, type, parent_id, icon, color, sort_order) VALUES (?,?,?,?,?,?,?)",
@@ -167,7 +167,7 @@ async function initTables() {
       for (const sub of subs) {
         await db.execute(
           "INSERT INTO categories (id, name, type, parent_id, icon, color, sort_order) VALUES (?,?,?,?,?,?,?)",
-          [uuid(), sub.name, "expense", expenseParents[parent.name], parent.icon, parent.color, sortIdx]
+          [genUuid(), sub.name, "expense", expenseParents[parent.name], parent.icon, parent.color, sortIdx]
         );
         sortIdx++;
       }
@@ -186,7 +186,7 @@ async function initTables() {
       const c = incomeCatDefs[i];
       await db.execute(
         "INSERT INTO categories (id, name, type, parent_id, icon, color, sort_order) VALUES (?,?,?,?,?,?,?)",
-        [uuid(), c.name, "income", null, c.icon, c.color, i]
+        [genUuid(), c.name, "income", null, c.icon, c.color, i]
       );
     }
   }

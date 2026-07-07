@@ -16,7 +16,7 @@ import {
   getTransactions, addTransaction, updateTransaction, deleteTransaction,
   getCategories, getAccounts,
 } from "../lib/cloud";
-import { formatAmount, formatDate } from "../lib/utils";
+import { uuid, formatAmount, formatDate } from "../lib/utils";
 import type { Transaction } from "../lib/db";
 
 interface OutletContext {
@@ -99,7 +99,7 @@ export function TransactionsPage() {
       if (editingTx) {
         await updateTransaction(editingTx.id, data);
       } else {
-        await addTransaction({ id: crypto.randomUUID(), ...data });
+        await addTransaction({ id: uuid(), ...data });
       }
       setDialogOpen(false);
       refreshStats();

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { uuid } from "../lib/utils";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import {
@@ -97,7 +98,7 @@ export function CategoriesPage() {
           ? categories.find((c: any) => c.id === catParent)
           : null;
         await addCategory({
-          id: crypto.randomUUID(),
+          id: uuid(),
           name: catName,
           type: isSub ? (parentCat?.type || catType) : catType,
           parent_id: isSub ? catParent : null,
