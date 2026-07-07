@@ -296,7 +296,7 @@ export function StockPage() {
 
   // Calculate summary
   const totalCost = holdings.reduce((s, h) => s + (h.price != null ? h.cost_price * h.shares : 0), 0);
-  const totalMarketValue = holdings.reduce((s, h) => s + (h.marketValue || h.shares * h.cost_price || 0), 0);
+  const totalMarketValue = holdings.reduce((s, h) => s + (h.marketValue || 0), 0);
   const totalPnl = totalMarketValue - totalCost;
   const totalRealizedPnl = completedData?.summary?.totalRealizedPnl || 0;
 
@@ -337,8 +337,8 @@ export function StockPage() {
             <div className="p-2 bg-purple-50 rounded-lg">
               <DollarSign className="h-4 w-4 md:h-5 md:w-5 text-purple-600" />
             </div>
-            <span className="text-xs md:text-sm text-muted-foreground">可用余额 <span className="text-[10px] opacity-60">(自动)</span></span>
-            <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => { setCashInput(String(cashBalance)); setCashDialogOpen(true); }}>初始入金</button>
+            <span className="text-xs md:text-sm text-muted-foreground">可用余额</span>
+            <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => { setCashInput(String(cashBalance)); setCashDialogOpen(true); }}>编辑</button>
           </div>
           <p className="text-lg md:text-2xl font-bold text-purple-600">{formatAmount(cashBalance)}</p>
         </div>
@@ -980,11 +980,11 @@ export function StockPage() {
       <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>初始入金</DialogTitle>
+            <DialogTitle>设置可用余额</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label>初始入金金额（后续买卖自动扣减）</Label>
+              <Label>账户可用资金</Label>
               <Input type="number" step="0.01" placeholder="0.00" value={cashInput} onChange={(e) => setCashInput(e.target.value)} autoFocus />
             </div>
             <Button className="w-full" onClick={async () => {
