@@ -17,10 +17,10 @@ import {
   addStockHolding, deleteStockHolding,
   getStockTrades, addStockTrade, deleteStockTrade,
   getStockDividends, addStockDividend, deleteStockDividend,
-  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash, getStockMonthly,
+  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash, getStockMonthly, getDailyAssets, recordDailyAssets,
 } from "../lib/cloud";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { formatAmount, uuid } from "../lib/utils";
 
@@ -120,6 +120,7 @@ export function StockPage() {
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [cashDialogOpen, setCashDialogOpen] = useState(false);
   const [monthlyData, setMonthlyData] = useState<any[]>([]);
+  const [dailyAssets, setDailyAssets] = useState<any[]>([]);
   const [cashInput, setCashInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -152,13 +153,14 @@ export function StockPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pf, ts, ds, cp, ca, md] = await Promise.all([
+      const [pf, ts, ds, cp, ca, md, da] = await Promise.all([
         getStockPortfolio(),
         getStockTrades(),
         getStockDividends(),
         getStockCompleted(completedGroup === "time" ? "cycle" : "stock"),
         getStockCash(),
         getStockMonthly(),
+        getDailyAssets(),
       ]);
       setHoldings(pf.holdings || []);
       setTrades(ts);
@@ -166,6 +168,7 @@ export function StockPage() {
       setCompletedData(cp);
       setCashBalance(ca?.cash || 0);
       setMonthlyData(md || []);
+      setDailyAssets(da || []);
     } catch (e) {
       console.error("Failed to load stock data:", e);
     }
@@ -343,8 +346,8 @@ export function StockPage() {
             <div className="p-2 bg-purple-50 rounded-lg">
               <DollarSign className="h-4 w-4 md:h-5 md:w-5 text-purple-600" />
             </div>
-            <span className="text-xs md:text-sm text-muted-foreground">可用余额 <span className="text-[10px] opacity-60">(自动)</span></span>
-            <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => { setCashInput(String(cashBalance)); setCashDialogOpen(true); }}>初始入金</button>
+            <span className="text-xs md:text-sm text-muted-foreground">可用余额</span>
+            <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => { setCashInput(String(cashBalance)); setCashDialogOpen(true); }}>编辑</button>
           </div>
           <p className="text-lg md:text-2xl font-bold text-purple-600">{formatAmount(cashBalance)}</p>
         </div>
@@ -582,6 +585,7 @@ export function StockPage() {
           <TabsTrigger value="allDividends">分红记录</TabsTrigger>
           <TabsTrigger value="completed">已完成</TabsTrigger>
           <TabsTrigger value="monthly">月度收益</TabsTrigger>
+          <TabsTrigger value="trend">资产趋势</TabsTrigger>
           {selectedStock && <TabsTrigger value="detail">{(holdings.find(h => h.stock_code === selectedStock)?.stock_name || selectedStock)}详情</TabsTrigger>}
         </TabsList>
 
@@ -982,8 +986,33 @@ export function StockPage() {
             );
           })()}
         </TabsContent>
-      </Tabs>
-      {/* Monthly P&L Chart */}
+        <TabsContent value="trend">
+          <div className="bg-white rounded-xl border shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">每日总资产</h3>
+              <Button size="sm" variant="outline" onClick={async () => {
+                try { await recordDailyAssets({ totalAssets: totalMarketValue + cashBalance, marketValue: totalMarketValue, cashBalance }); setDailyAssets([...dailyAssets, { date: new Date().toISOString().substring(0, 10), total_assets: totalMarketValue + cashBalance, market_value: totalMarketValue, cash_balance: cashBalance }]); } catch {}
+              }}>记录快照</Button>
+            </div>
+            {dailyAssets.length < 2 ? (
+              <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+                暂无足够数据，先刷新行情或点击"记录快照"
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dailyAssets}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => "¥" + (v / 10000).toFixed(1) + "w"} domain={["auto", "auto"]} />
+                  <Tooltip formatter={(value: any) => ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 })]} />
+                  <Line type="monotone" dataKey="total_assets" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="总资产" />
+                  <Line type="monotone" dataKey="market_value" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="持仓市值" />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </TabsContent>
+
         <TabsContent value="monthly">
           <div className="bg-white rounded-xl border shadow-sm p-5">
             <h3 className="font-semibold mb-4">月度收益</h3>
@@ -1022,16 +1051,16 @@ export function StockPage() {
             ))}
           </div>
         </TabsContent>
-      
+      </Tabs>
       {/* Cash Balance Dialog */}
       <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>初始入金</DialogTitle>
+            <DialogTitle>设置可用余额</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label>初始入金金额（后续买卖自动扣减）</Label>
+              <Label>账户可用资金</Label>
               <Input type="number" step="0.01" placeholder="0.00" value={cashInput} onChange={(e) => setCashInput(e.target.value)} autoFocus />
             </div>
             <Button className="w-full" onClick={async () => {

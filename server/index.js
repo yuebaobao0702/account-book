@@ -23,7 +23,8 @@ function initTables() {
   db.exec("CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, category_id TEXT NOT NULL, amount REAL NOT NULL, month TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
   db.exec("CREATE TABLE IF NOT EXISTS stock_holdings (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, shares REAL NOT NULL DEFAULT 0, cost_price REAL NOT NULL DEFAULT 0, market TEXT NOT NULL DEFAULT 'SZ', account_id TEXT NOT NULL DEFAULT 'default', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
   db.exec("CREATE TABLE IF NOT EXISTS stock_trades (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, trade_type TEXT NOT NULL CHECK(trade_type IN ('buy','sell')), shares REAL NOT NULL, price REAL NOT NULL, amount REAL NOT NULL, commission REAL NOT NULL DEFAULT 0, date TEXT NOT NULL, note TEXT DEFAULT '', account_id TEXT NOT NULL DEFAULT 'default', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
-  db.exec("CREATE TABLE IF NOT EXISTS stock_dividends (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, dividend_per_share REAL NOT NULL, total_amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
+    db.exec("CREATE TABLE IF NOT EXISTS daily_assets (date TEXT PRIMARY KEY, total_assets REAL NOT NULL, market_value REAL NOT NULL, cash_balance REAL NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));");
+db.exec("CREATE TABLE IF NOT EXISTS stock_dividends (id TEXT PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, dividend_per_share REAL NOT NULL, total_amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))");
 }
 
 function seedData() {
@@ -459,7 +460,7 @@ app.delete("/api/stocks/dividends/:id", (req, res) => {
 // Completed positions (realized P&L)
 // Monthly P&L statistics
 app.get("/api/stocks/monthly", (req, res) => {
-  const codes = db.prepare("SELECT stock_code,stock_name,SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) as net FROM stock_trades GROUP BY stock_code HAVING net <= 0").all();
+  const codes = db.prepare("SELECT DISTINCT stock_code,stock_name FROM stock_trades").all();
   const months = {};
 
   for (const { stock_code, stock_name } of codes) {
@@ -499,7 +500,7 @@ app.get("/api/stocks/completed", (req, res) => {
 
   if (group === "cycle") {
     // Per-cycle view: split trades into individual buy-sell cycles
-    const codes = db.prepare("SELECT stock_code,stock_name,SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) as net FROM stock_trades GROUP BY stock_code HAVING net <= 0").all();
+    const codes = db.prepare("SELECT DISTINCT stock_code,stock_name FROM stock_trades").all();
     for (const { stock_code, stock_name } of codes) {
       const trades = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date ASC, created_at ASC").all(stock_code);
       let sharesHeld = 0, costBasis = 0;
@@ -553,7 +554,6 @@ app.get("/api/stocks/completed", (req, res) => {
         MAX(date) as last_trade
       FROM stock_trades
       GROUP BY stock_code
-      HAVING SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) <= 0
       ORDER BY last_trade DESC
     `).all();
     result = rows.map(r => ({
@@ -575,13 +575,23 @@ app.get("/api/stocks/completed", (req, res) => {
 });
 
 // Get/set available cash balance for stock account
+// Daily assets tracking
+app.get("/api/stocks/daily-assets", (req, res) => {
+  const rows = db.prepare("SELECT date,total_assets,market_value,cash_balance FROM daily_assets ORDER BY date ASC").all();
+  res.json(rows);
+});
+
+// Record today's assets snapshot (called from frontend)
+app.post("/api/stocks/daily-assets", (req, res) => {
+  const { totalAssets, marketValue, cashBalance } = req.body;
+  const today = new Date().toISOString().substring(0, 10);
+  db.prepare("INSERT OR REPLACE INTO daily_assets (date,total_assets,market_value,cash_balance) VALUES (?,?,?,?)").run(today, totalAssets || 0, marketValue || 0, cashBalance || 0);
+  res.json({ ok: true });
+});
+
 app.get("/api/stocks/cash", (req, res) => {
   const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  const initialDeposit = row ? parseFloat(row.value) : 0;
-  // Calculate running balance from all trades
-  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
-  const cash = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
-  res.json({ cash, initialDeposit });
+  res.json({ cash: row ? parseFloat(row.value) : 0 });
 });
 
 app.put("/api/stocks/cash", (req, res) => {
@@ -591,22 +601,7 @@ app.put("/api/stocks/cash", (req, res) => {
   res.json({ ok: true });
 });
 
-// Portfolio summary// Get/set available cash balance for stock account
-app.get("/api/stocks/cash", (req, res) => {
-  const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  const initialDeposit = row ? parseFloat(row.value) : 0;
-  // Calculate running balance from all trades
-  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
-  const cash = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
-  res.json({ cash, initialDeposit });
-});
 
-app.put("/api/stocks/cash", (req, res) => {
-  const { cash } = req.body;
-  if (cash == null || isNaN(cash)) return res.status(400).json({ error: "请输入有效金额" });
-  db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('stock_cash_balance',?)").run(String(cash));
-  res.json({ ok: true });
-});
 
 // Portfolio summary
 app.get("/api/stocks/portfolio", (req, res) => {
@@ -616,19 +611,37 @@ app.get("/api/stocks/portfolio", (req, res) => {
   `).all();
   const totalInvested = holdings.reduce((s, h) => s + (h.shares * h.cost_price), 0);
   const totalDividends = db.prepare("SELECT COALESCE(SUM(total_amount),0) as total FROM stock_dividends").get().total;
-  const completed = db.prepare("SELECT stock_code,SUM(CASE WHEN trade_type='buy' THEN amount ELSE 0 END) as tb,SUM(CASE WHEN trade_type='sell' THEN amount ELSE 0 END) as ts,SUM(commission) as tc FROM stock_trades WHERE stock_code NOT IN (SELECT stock_code FROM stock_holdings) GROUP BY stock_code").all();
-  const totalRealizedPnl = completed.reduce((s, c) => s + (c.ts - c.tb - c.tc), 0);
+  // Calculate realized P&L from all completed cycles (all stocks, detect cycles from trades)
+  const allCodes = db.prepare("SELECT DISTINCT stock_code FROM stock_trades").all();
+  let realizedPnlTotal = 0;
+  let completedCycleCount = 0;
+  for (const { stock_code } of allCodes) {
+    const trades = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date ASC, created_at ASC").all(stock_code);
+    let sH = 0, cBuys = [], cSells = [], cComms = [];
+    for (const t of trades) {
+      if (t.trade_type === "buy") { sH += t.shares; cBuys.push(t); }
+      else { cSells.push(t); sH -= t.shares; }
+      cComms.push(t.commission || 0);
+      if (sH <= 0 && cBuys.length > 0) {
+        const tb = cBuys.reduce((s, x) => s + x.amount, 0);
+        const ts = cSells.reduce((s, x) => s + x.amount, 0);
+        const tc = cComms.reduce((s, x) => s + x, 0);
+        realizedPnlTotal += ts - tb - tc;
+        completedCycleCount++;
+        sH = 0; cBuys = []; cSells = []; cComms = [];
+      }
+    }
+  }
+  const totalRealizedPnl = realizedPnlTotal;
   const cashRow = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  const initialDeposit = cashRow ? parseFloat(cashRow.value) : 0;
-  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
-  const cashBalance = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
+  const cashBalance = cashRow ? parseFloat(cashRow.value) : 0;
   res.json({
     holdings,
     totalInvested,
     totalDividends,
     totalRealizedPnl,
     holdingCount: holdings.length,
-    completedCount: completed.length,
+    completedCount: completedCycleCount,
     cashBalance,
   });
 });
