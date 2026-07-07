@@ -541,7 +541,11 @@ app.get("/api/stocks/completed", (req, res) => {
 // Get/set available cash balance for stock account
 app.get("/api/stocks/cash", (req, res) => {
   const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  res.json({ cash: row ? parseFloat(row.value) : 0 });
+  const initialDeposit = row ? parseFloat(row.value) : 0;
+  // Calculate running balance from all trades
+  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
+  const cash = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
+  res.json({ cash, initialDeposit });
 });
 
 app.put("/api/stocks/cash", (req, res) => {
@@ -554,7 +558,11 @@ app.put("/api/stocks/cash", (req, res) => {
 // Portfolio summary// Get/set available cash balance for stock account
 app.get("/api/stocks/cash", (req, res) => {
   const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  res.json({ cash: row ? parseFloat(row.value) : 0 });
+  const initialDeposit = row ? parseFloat(row.value) : 0;
+  // Calculate running balance from all trades
+  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
+  const cash = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
+  res.json({ cash, initialDeposit });
 });
 
 app.put("/api/stocks/cash", (req, res) => {
@@ -575,7 +583,9 @@ app.get("/api/stocks/portfolio", (req, res) => {
   const completed = db.prepare("SELECT stock_code,SUM(CASE WHEN trade_type='buy' THEN amount ELSE 0 END) as tb,SUM(CASE WHEN trade_type='sell' THEN amount ELSE 0 END) as ts,SUM(commission) as tc FROM stock_trades WHERE stock_code NOT IN (SELECT stock_code FROM stock_holdings) GROUP BY stock_code").all();
   const totalRealizedPnl = completed.reduce((s, c) => s + (c.ts - c.tb - c.tc), 0);
   const cashRow = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
-  const cashBalance = cashRow ? parseFloat(cashRow.value) : 0;
+  const initialDeposit = cashRow ? parseFloat(cashRow.value) : 0;
+  const stats = db.prepare("SELECT COALESCE(SUM(CASE WHEN trade_type='buy' THEN amount + (commission || 0) ELSE 0 END),0) as total_buy_cost,COALESCE(SUM(CASE WHEN trade_type='sell' THEN amount - (commission || 0) ELSE 0 END),0) as total_sell_revenue FROM stock_trades").get();
+  const cashBalance = initialDeposit - (stats.total_buy_cost || 0) + (stats.total_sell_revenue || 0);
   res.json({
     holdings,
     totalInvested,
