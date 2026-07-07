@@ -17,8 +17,11 @@ import {
   addStockHolding, deleteStockHolding,
   getStockTrades, addStockTrade, deleteStockTrade,
   getStockDividends, addStockDividend, deleteStockDividend,
-  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash,
+  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash, getStockMonthly,
 } from "../lib/cloud";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
 import { formatAmount, uuid } from "../lib/utils";
 
 interface Holding {
@@ -116,6 +119,7 @@ export function StockPage() {
   const [completedData, setCompletedData] = useState<any>(null);
   const [cashBalance, setCashBalance] = useState<number>(0);
   const [cashDialogOpen, setCashDialogOpen] = useState(false);
+  const [monthlyData, setMonthlyData] = useState<any[]>([]);
   const [cashInput, setCashInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -148,18 +152,20 @@ export function StockPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pf, ts, ds, cp, ca] = await Promise.all([
+      const [pf, ts, ds, cp, ca, md] = await Promise.all([
         getStockPortfolio(),
         getStockTrades(),
         getStockDividends(),
         getStockCompleted(completedGroup === "time" ? "cycle" : "stock"),
         getStockCash(),
+        getStockMonthly(),
       ]);
       setHoldings(pf.holdings || []);
       setTrades(ts);
       setDividends(ds);
       setCompletedData(cp);
       setCashBalance(ca?.cash || 0);
+      setMonthlyData(md || []);
     } catch (e) {
       console.error("Failed to load stock data:", e);
     }
@@ -575,6 +581,7 @@ export function StockPage() {
           <TabsTrigger value="allTrades">交易记录</TabsTrigger>
           <TabsTrigger value="allDividends">分红记录</TabsTrigger>
           <TabsTrigger value="completed">已完成</TabsTrigger>
+          <TabsTrigger value="monthly">月度收益</TabsTrigger>
           {selectedStock && <TabsTrigger value="detail">{(holdings.find(h => h.stock_code === selectedStock)?.stock_name || selectedStock)}详情</TabsTrigger>}
         </TabsList>
 
@@ -976,6 +983,46 @@ export function StockPage() {
           })()}
         </TabsContent>
       </Tabs>
+      {/* Monthly P&L Chart */}
+        <TabsContent value="monthly">
+          <div className="bg-white rounded-xl border shadow-sm p-5">
+            <h3 className="font-semibold mb-4">月度收益</h3>
+            {monthlyData.length === 0 ? (
+              <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+                暂无已完成交易的月度数据
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={monthlyData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => "¥" + v.toLocaleString()} />
+                  <Tooltip
+                    formatter={(value: any) => ["¥" + Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2 }), "收益"]}
+                    labelFormatter={(label) => label + "月"}
+                  />
+                  <Bar dataKey="pnl" name="收益" radius={[4, 4, 0, 0]}
+                    shape={(props: any) => {
+                      const { x, y, width, height, payload } = props;
+                      return <rect x={x} y={y} width={width} height={height >= 0 ? height : 0} fill={payload.pnl >= 0 ? "#ef4444" : "#22c55e"} rx={4} />;
+                    }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+            {monthlyData.map((m: any) => (
+              <div key={m.month} className="bg-white rounded-xl border shadow-sm p-4">
+                <p className="text-xs text-muted-foreground mb-1">{m.month}</p>
+                <p className={"text-sm font-bold " + (m.pnl >= 0 ? "text-red-500" : "text-emerald-600")}>
+                  {m.count}笔 {formatPnl(m.pnl)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+      
       {/* Cash Balance Dialog */}
       <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
         <DialogContent>

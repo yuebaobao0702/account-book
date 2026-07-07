@@ -263,6 +263,10 @@ export async function lookupStock(code: string, market?: string) {
   return api(`/api/stocks/lookup?code=${code}&market=${market || ""}`);
 }
 
+export async function getStockMonthly() {
+  return api("/api/stocks/monthly");
+}
+
 export async function getStockCash() {
   return api("/api/stocks/cash");
 }

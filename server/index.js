@@ -457,6 +457,42 @@ app.delete("/api/stocks/dividends/:id", (req, res) => {
 });
 
 // Completed positions (realized P&L)
+// Monthly P&L statistics
+app.get("/api/stocks/monthly", (req, res) => {
+  const codes = db.prepare("SELECT stock_code,stock_name,SUM(CASE WHEN trade_type='buy' THEN shares ELSE -shares END) as net FROM stock_trades GROUP BY stock_code HAVING net <= 0").all();
+  const months = {};
+
+  for (const { stock_code, stock_name } of codes) {
+    const trades = db.prepare("SELECT * FROM stock_trades WHERE stock_code=? ORDER BY date ASC, created_at ASC").all(stock_code);
+    let sH = 0, cB = 0, cBuys = [], cSells = [], cComms = [], cS = "", cE = "";
+
+    for (const t of trades) {
+      if (t.trade_type === "buy") { sH += t.shares; cB += t.amount; cBuys.push(t); if (!cS) cS = t.date; }
+      else { cSells.push(t); sH -= t.shares; cE = t.date; }
+      cComms.push(t.commission || 0);
+
+      if (sH <= 0 && cBuys.length > 0) {
+        const totalBuy = cBuys.reduce((s, x) => s + x.amount, 0);
+        const totalSell = cSells.reduce((s, x) => s + x.amount, 0);
+        const totalComm = cComms.reduce((s, x) => s + x, 0);
+        const pnl = totalSell - totalBuy - totalComm;
+        const month = cE ? cE.substring(0, 7) : "";
+        if (month) {
+          if (!months[month]) months[month] = { month, pnl: 0, count: 0, buy: 0, sell: 0 };
+          months[month].pnl += pnl;
+          months[month].count++;
+          months[month].buy += totalBuy;
+          months[month].sell += totalSell;
+        }
+        sH = 0; cB = 0; cBuys = []; cSells = []; cComms = []; cS = ""; cE = "";
+      }
+    }
+  }
+
+  const data = Object.values(months).sort((a, b) => a.month.localeCompare(b.month));
+  res.json(data);
+});
+
 app.get("/api/stocks/completed", (req, res) => {
   const group = req.query.group || "stock";
   let result = [];
