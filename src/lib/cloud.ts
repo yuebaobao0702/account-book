@@ -263,6 +263,17 @@ export async function lookupStock(code: string, market?: string) {
   return api(`/api/stocks/lookup?code=${code}&market=${market || ""}`);
 }
 
+export async function getStockCash() {
+  return api("/api/stocks/cash");
+}
+
+export async function setStockCash(cash: number) {
+  return api("/api/stocks/cash", {
+    method: "PUT",
+    body: JSON.stringify({ cash }),
+  });
+}
+
 export async function getStockCompleted(group = "stock") {
   return api(`/api/stocks/completed?group=${group}`);
 }

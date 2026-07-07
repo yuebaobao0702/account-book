@@ -17,7 +17,7 @@ import {
   addStockHolding, deleteStockHolding,
   getStockTrades, addStockTrade, deleteStockTrade,
   getStockDividends, addStockDividend, deleteStockDividend,
-  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock,
+  fetchStockPrices, getStockPortfolio, getStockCompleted, lookupStock, getStockCash, setStockCash,
 } from "../lib/cloud";
 import { formatAmount, uuid } from "../lib/utils";
 
@@ -111,10 +111,12 @@ function detectMarket(code: string): string {
 
 export function StockPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [portfolio, setPortfolio] = useState<any>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dividends, setDividends] = useState<Dividend[]>([]);
   const [completedData, setCompletedData] = useState<any>(null);
+  const [cashBalance, setCashBalance] = useState<number>(0);
+  const [cashDialogOpen, setCashDialogOpen] = useState(false);
+  const [cashInput, setCashInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedStock, setSelectedStock] = useState<string>("");
@@ -146,17 +148,18 @@ export function StockPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [pf, ts, ds, cp] = await Promise.all([
+      const [pf, ts, ds, cp, ca] = await Promise.all([
         getStockPortfolio(),
         getStockTrades(),
         getStockDividends(),
         getStockCompleted(completedGroup === "time" ? "cycle" : "stock"),
+        getStockCash(),
       ]);
-      setPortfolio(pf);
       setHoldings(pf.holdings || []);
       setTrades(ts);
       setDividends(ds);
       setCompletedData(cp);
+      setCashBalance(ca?.cash || 0);
     } catch (e) {
       console.error("Failed to load stock data:", e);
     }
@@ -314,9 +317,9 @@ export function StockPage() {
             <div className="p-2 bg-blue-50 rounded-lg">
               <Wallet className="h-4 w-4 md:h-5 md:w-5 text-blue-600" />
             </div>
-            <span className="text-xs md:text-sm text-muted-foreground">总投入</span>
+            <span className="text-xs md:text-sm text-muted-foreground">总资产</span>
           </div>
-          <p className="text-lg md:text-2xl font-bold">{formatAmount(portfolio?.totalInvested || 0)}</p>
+          <p className="text-lg md:text-2xl font-bold">{formatAmount(totalMarketValue + cashBalance)}</p>
         </div>
         <div className="bg-white rounded-xl p-4 md:p-5 border shadow-sm">
           <div className="flex items-center gap-3 mb-2">
@@ -328,6 +331,16 @@ export function StockPage() {
           <p className="text-lg md:text-2xl font-bold text-green-600">
             {totalMarketValue > 0 ? formatAmount(totalMarketValue) : "-"}
           </p>
+        </div>
+        <div className="bg-white rounded-xl p-4 md:p-5 border shadow-sm">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 bg-purple-50 rounded-lg">
+              <DollarSign className="h-4 w-4 md:h-5 md:w-5 text-purple-600" />
+            </div>
+            <span className="text-xs md:text-sm text-muted-foreground">可用余额</span>
+            <button className="ml-auto text-xs text-muted-foreground hover:text-foreground" onClick={() => { setCashInput(String(cashBalance)); setCashDialogOpen(true); }}>编辑</button>
+          </div>
+          <p className="text-lg md:text-2xl font-bold text-purple-600">{formatAmount(cashBalance)}</p>
         </div>
         <div className="bg-white rounded-xl p-4 md:p-5 border shadow-sm">
           <div className="flex items-center gap-3 mb-2">
@@ -963,6 +976,28 @@ export function StockPage() {
           })()}
         </TabsContent>
       </Tabs>
+      {/* Cash Balance Dialog */}
+      <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>设置可用余额</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>账户可用资金</Label>
+              <Input type="number" step="0.01" placeholder="0.00" value={cashInput} onChange={(e) => setCashInput(e.target.value)} autoFocus />
+            </div>
+            <Button className="w-full" onClick={async () => {
+              const v = parseFloat(cashInput);
+              if (!isNaN(v)) {
+                await setStockCash(v);
+                setCashBalance(v);
+                setCashDialogOpen(false);
+              }
+            }}>保存</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

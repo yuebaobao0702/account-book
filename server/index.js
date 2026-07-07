@@ -538,7 +538,33 @@ app.get("/api/stocks/completed", (req, res) => {
   res.json({ positions: result, summary, group });
 });
 
-// Portfolio summary// Portfolio summary
+// Get/set available cash balance for stock account
+app.get("/api/stocks/cash", (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
+  res.json({ cash: row ? parseFloat(row.value) : 0 });
+});
+
+app.put("/api/stocks/cash", (req, res) => {
+  const { cash } = req.body;
+  if (cash == null || isNaN(cash)) return res.status(400).json({ error: "请输入有效金额" });
+  db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('stock_cash_balance',?)").run(String(cash));
+  res.json({ ok: true });
+});
+
+// Portfolio summary// Get/set available cash balance for stock account
+app.get("/api/stocks/cash", (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
+  res.json({ cash: row ? parseFloat(row.value) : 0 });
+});
+
+app.put("/api/stocks/cash", (req, res) => {
+  const { cash } = req.body;
+  if (cash == null || isNaN(cash)) return res.status(400).json({ error: "请输入有效金额" });
+  db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('stock_cash_balance',?)").run(String(cash));
+  res.json({ ok: true });
+});
+
+// Portfolio summary
 app.get("/api/stocks/portfolio", (req, res) => {
   const holdings = db.prepare(`
     SELECT h.*, COALESCE((SELECT SUM(CASE WHEN trade_type='buy' THEN amount ELSE -amount END) FROM stock_trades WHERE stock_code=h.stock_code), h.shares * h.cost_price) as total_invested
@@ -548,11 +574,16 @@ app.get("/api/stocks/portfolio", (req, res) => {
   const totalDividends = db.prepare("SELECT COALESCE(SUM(total_amount),0) as total FROM stock_dividends").get().total;
   const completed = db.prepare("SELECT stock_code,SUM(CASE WHEN trade_type='buy' THEN amount ELSE 0 END) as tb,SUM(CASE WHEN trade_type='sell' THEN amount ELSE 0 END) as ts,SUM(commission) as tc FROM stock_trades WHERE stock_code NOT IN (SELECT stock_code FROM stock_holdings) GROUP BY stock_code").all();
   const totalRealizedPnl = completed.reduce((s, c) => s + (c.ts - c.tb - c.tc), 0);
+  const cashRow = db.prepare("SELECT value FROM settings WHERE key='stock_cash_balance'").get();
+  const cashBalance = cashRow ? parseFloat(cashRow.value) : 0;
   res.json({
     holdings,
     totalInvested,
     totalDividends,
+    totalRealizedPnl,
     holdingCount: holdings.length,
+    completedCount: completed.length,
+    cashBalance,
   });
 });
 
