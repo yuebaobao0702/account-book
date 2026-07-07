@@ -30,7 +30,7 @@ export function LockPage({ onUnlock }: LockPageProps) {
       })
       .catch((e) => {
         console.error("LockPage init error:", e);
-        setError("初始化失败，请确认数据库可写入: " + (e?.toString() || "未知错误"));
+        setError("连接服务器失败: " + (e?.toString() || "未知错误"));
         setLoading(false);
       });
   }, []);

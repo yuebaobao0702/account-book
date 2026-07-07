@@ -174,6 +174,57 @@ app.get("/api/export/csv", (req,res) => {
   res.send(csv);
 });
 
+// ===== Import endpoints =====
+app.post("/api/import/csv", (req, res) => {
+  let body = "";
+  req.on("data", (chunk) => { body += chunk; });
+  req.on("end", () => {
+    try {
+      const lines = body.split("\n").filter(l => l.trim());
+      if (lines.length < 2) return res.json({ count: 0 });
+      let count = 0;
+      for (let i = 1; i < lines.length; i++) {
+        const fields = parseCSVLine(lines[i].trim());
+        if (fields.length < 3) continue;
+        const date = fields[0], type = fields[1] === "\u6536\u5165" ? "income" : "expense", amount = parseFloat(fields[2]);
+        if (isNaN(amount) || !date) continue;
+        let catField = fields[3] || "", categoryId = "";
+        if (catField.includes("/")) {
+          const parts = catField.split("/");
+          const cats = db.prepare("SELECT c.id FROM categories c LEFT JOIN categories p ON c.parent_id=p.id WHERE p.name=? AND c.name=? AND c.type=?").all(parts[0].trim(), parts[1].trim(), type);
+          if (cats.length > 0) categoryId = cats[0].id;
+        }
+        if (!categoryId) {
+          const cats = db.prepare("SELECT id FROM categories WHERE name=? AND type=? LIMIT 1").all(catField, type);
+          if (cats.length > 0) categoryId = cats[0].id;
+          else {
+            const fb = db.prepare("SELECT id FROM categories WHERE type=? LIMIT 1").all(type);
+            if (fb.length === 0) continue;
+            categoryId = fb[0].id;
+          }
+        }
+        const accName = fields[5] || "\u73b0\u91d1";
+        const accs = db.prepare("SELECT id FROM accounts WHERE name=? LIMIT 1").all(accName);
+        let accId = "default";
+        if (accs.length > 0) accId = accs[0].id;
+        const note = fields[6] || "";
+        db.prepare("INSERT INTO transactions (id,type,amount,category_id,account_id,date,note) VALUES (?,?,?,?,?,?,?)").run(uuidv4(),type,amount,categoryId,accId,date,note);
+        const sign = type === "income" ? 1 : -1;
+        db.prepare("UPDATE accounts SET balance = balance + ? WHERE id = ?").run(sign * amount, accId);
+        count++;
+      }
+      res.json({ count });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+});
+
+app.post("/api/import/excel", (req, res) => {
+  // For simplicity, delegate to CSV import after parsing
+  res.status(501).json({ error: "Excel导入通过web界面暂不支持" });
+});
+
+// Serve built frontend
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("account book api running on port " + PORT);
 });

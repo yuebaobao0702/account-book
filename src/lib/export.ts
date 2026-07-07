@@ -1,6 +1,4 @@
 import { getDb } from "./db";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile, writeFile } from "@tauri-apps/plugin-fs";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -77,12 +75,20 @@ export async function exportCSV() {
     const note = (r.note || "").replace(/"/g, '""');
     csv += date + "," + type + "," + (r.amount || 0) + ',"' + cat + '",' + (r.account || "") + ',"' + note + '"\n';
   }
-  const path = await save({
-    filters: [{ name: "CSV 文件", extensions: ["csv"] }],
-    defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".csv",
-  });
-  if (!path) return;
-  await writeTextFile(path, csv);
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+    const path = await save({ filters: [{ name: "CSV 文件", extensions: ["csv"] }], defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".csv" });
+    if (!path) return;
+    await writeTextFile(path, csv);
+  } else {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "账本_" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function exportExcel() {
@@ -111,12 +117,20 @@ export async function exportExcel() {
   ];
   XLSX.utils.book_append_sheet(wb, ws, "收支记录");
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-  const path = await save({
-    filters: [{ name: "Excel 文件", extensions: ["xlsx"] }],
-    defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".xlsx",
-  });
-  if (!path) return;
-  await writeFile(path, buf);
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeFile } = await import("@tauri-apps/plugin-fs");
+    const path = await save({ filters: [{ name: "Excel 文件", extensions: ["xlsx"] }], defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".xlsx" });
+    if (!path) return;
+    await writeFile(path, buf);
+  } else {
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "账本_" + new Date().toISOString().slice(0, 10) + ".xlsx";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function exportPDF() {
@@ -206,17 +220,27 @@ export async function exportPDF() {
   doc.addImage(imgData, "JPEG", 5, 5, imgWidth, imgHeight);
 
   const buf = doc.output("arraybuffer");
-  const path = await save({
-    filters: [{ name: "PDF 文件", extensions: ["pdf"] }],
-    defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".pdf",
-  });
-  if (!path) return;
-  await writeFile(path, new Uint8Array(buf));
+  if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { writeFile } = await import("@tauri-apps/plugin-fs");
+    const path = await save({ filters: [{ name: "PDF 文件", extensions: ["pdf"] }], defaultPath: "账本_" + new Date().toISOString().slice(0, 10) + ".pdf" });
+    if (!path) return;
+    await writeFile(path, new Uint8Array(buf));
+  } else {
+    const blob = new Blob([buf], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "账本_" + new Date().toISOString().slice(0, 10) + ".pdf";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 }
 
 export async function importCSV() {
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const { readTextFile } = await import("@tauri-apps/plugin-fs");
+  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  if (!isTauri) throw new Error("导入功能仅支持桌面端");
+  const { open }: any = await import("@tauri-apps/plugin-dialog");
+  const { readTextFile }: any = await import("@tauri-apps/plugin-fs");
   const path = await open({
     filters: [{ name: "CSV 文件", extensions: ["csv"] }],
     multiple: false,
@@ -290,8 +314,10 @@ function parseCSVLine(line: string): string[] {
 }
 
 export async function importExcel() {
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const { readFile } = await import("@tauri-apps/plugin-fs");
+  const isTauri2 = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  if (!isTauri2) throw new Error("导入功能仅支持桌面端");
+  const { open }: any = await import("@tauri-apps/plugin-dialog");
+  const { readFile }: any = await import("@tauri-apps/plugin-fs");
   const path = await open({
     filters: [{ name: "Excel \u6587\u4ef6", extensions: ["xlsx", "xls"] }],
     multiple: false,

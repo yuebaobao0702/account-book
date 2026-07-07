@@ -16,15 +16,26 @@ async function api(path: string, options?: RequestInit) {
   if (options?.body) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(SERVER_URL + path, {
-    ...options,
-    headers: { ...headers, ...(options?.headers as Record<string, string>) },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || "请求失败");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(SERVER_URL + path, {
+      ...options,
+      signal: controller.signal,
+      headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || "请求失败");
+    }
+    return res.json();
+  } catch (e: any) {
+    clearTimeout(timeout);
+    if (e.name === "AbortError") throw new Error("连接服务器超时，请检查网络");
+    throw e;
   }
-  return res.json();
 }
 
 // Auth
@@ -44,6 +55,10 @@ export async function setInitialPassword(password: string): Promise<void> {
 // Store password in memory for subsequent API calls
 export function setPassword(pw: string) {
   appPassword = pw;
+}
+
+export function getAppPassword(): string {
+  return appPassword;
 }
 
 // Password verify (uses the same password header)
