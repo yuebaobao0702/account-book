@@ -111,26 +111,44 @@ function LoanLockPage({ onUnlock }: { onUnlock: () => void }) {
 
 export function LoansPage() {
   const [unlocked, setUnlocked] = useState(false);
+
+  if (!unlocked) {
+    return <LoanLockPage onUnlock={() => setUnlocked(true)} />;
+  }
+
+  return <LoansContent />;
+}
+
+function LoansContent() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [platformFilter, setPlatformFilter] = useState<string>("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [formPlatform, setFormPlatform] = useState("");
   const [formDueDate, setFormDueDate] = useState("");
   const [formAmount, setFormAmount] = useState("");
   const [formNote, setFormNote] = useState("");
 
-  if (!unlocked) {
-    return <LoanLockPage onUnlock={() => setUnlocked(true)} />;
-  }
-
   const loadLoans = async () => {
     setLoading(true);
     try {
-      const data = await getLoans(statusFilter || undefined);
+      const data = await getLoans({
+        status: statusFilter || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        platform: platformFilter || undefined,
+      });
       setLoans(data);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -143,7 +161,7 @@ export function LoansPage() {
     } catch {}
   };
 
-  useEffect(() => { loadLoans(); }, [statusFilter]);
+  useEffect(() => { loadLoans(); }, [statusFilter, dateFrom, dateTo, platformFilter]);
 
   const resetForm = () => {
     setFormPlatform("");
@@ -224,6 +242,21 @@ export function LoansPage() {
     }
   };
 
+  const handleChangeLoanPw = async () => {
+    setPwError("");
+    setPwSuccess("");
+    if (!pwCurrent) { setPwError("请输入当前密码"); return; }
+    if (pwNew.length < 4) { setPwError("新密码至少4位"); return; }
+    if (pwNew !== pwConfirm) { setPwError("两次密码输入不一致"); return; }
+    try {
+      const ok = await verifyLoanPassword(pwCurrent);
+      if (!ok) { setPwError("当前密码错误"); return; }
+      await setupLoanPassword(pwNew);
+      setPwSuccess("密码修改成功");
+      setPwCurrent(""); setPwNew(""); setPwConfirm("");
+    } catch { setPwError("修改失败，请重试"); }
+  };
+
   const handleSaveWebhook = async () => {
     try {
       await setLoanSetting("webhook_url", webhookUrl);
@@ -268,8 +301,14 @@ export function LoansPage() {
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-2 mb-4">
+      {/* Platform list for dropdown */}
+      {(() => {
+        const platforms = [...new Set(loans.map(l => l.platform))].sort();
+        return null;
+      })()}
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <button
           onClick={() => setStatusFilter("")}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
@@ -294,6 +333,52 @@ export function LoansPage() {
         >
           已还
         </button>
+        <div className="w-px h-6 bg-border mx-1" />
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-8 px-2 text-xs rounded-md border border-input bg-background w-[130px]"
+            placeholder="开始日期"
+          />
+          <span className="text-xs text-muted-foreground">-</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-8 px-2 text-xs rounded-md border border-input bg-background w-[130px]"
+            placeholder="结束日期"
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              清除
+            </button>
+          )}
+        </div>
+        <div className="w-px h-6 bg-border mx-1" />
+        <select
+          value={platformFilter}
+          onChange={(e) => setPlatformFilter(e.target.value)}
+          className="h-8 px-2 text-xs rounded-md border border-input bg-background min-w-[80px]"
+        >
+          <option value="">全部平台</option>
+          {[...new Set(loans.map(l => l.platform))].sort().map(p => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        {platformFilter && (
+          <button
+            onClick={() => setPlatformFilter("")}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            清除
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -382,6 +467,23 @@ export function LoansPage() {
         </table>
       </div>
 
+      {/* Summary */}
+      <div className="mt-4 p-4 bg-muted/30 rounded-lg border">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="text-xs text-muted-foreground">当前筛选总计</p>
+              <p className="text-xl font-semibold tabular-nums">
+                {loans.reduce((s, l) => s + l.amount, 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            共 {loans.length} 笔
+          </p>
+        </div>
+      </div>
+
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) setDialogOpen(false); }}>
         <DialogContent>
@@ -441,7 +543,7 @@ export function LoansPage() {
           <DialogHeader>
             <DialogTitle>贷款模块设置</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="space-y-2">
               <Label>飞书 Webhook URL</Label>
               <Input
@@ -453,11 +555,41 @@ export function LoansPage() {
                 在飞书群中添加自定义机器人，复制 Webhook 地址粘贴到这里。每天 9:00 会自动提醒当天和次日到期的还款。
               </p>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+
+            <hr className="border-t" />
+
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">修改贷款密码</Label>
+              <Input
+                type="password"
+                value={pwCurrent}
+                onChange={(e) => setPwCurrent(e.target.value)}
+                placeholder="当前密码"
+              />
+              <Input
+                type="password"
+                value={pwNew}
+                onChange={(e) => setPwNew(e.target.value)}
+                placeholder="新密码（至少4位）"
+              />
+              <Input
+                type="password"
+                value={pwConfirm}
+                onChange={(e) => setPwConfirm(e.target.value)}
+                placeholder="确认新密码"
+              />
+              {pwError && <p className="text-sm text-destructive">{pwError}</p>}
+              {pwSuccess && <p className="text-sm text-emerald-600">{pwSuccess}</p>}
+              <Button variant="outline" size="sm" onClick={handleChangeLoanPw}>修改密码</Button>
+            </div>
+
+            <hr className="border-t" />
+
+            <div className="flex justify-end gap-2">
               <DialogClose asChild>
                 <Button variant="outline">取消</Button>
               </DialogClose>
-              <Button onClick={handleSaveWebhook}>保存</Button>
+              <Button onClick={handleSaveWebhook}>保存设置</Button>
             </div>
           </div>
         </DialogContent>

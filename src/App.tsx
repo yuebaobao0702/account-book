@@ -8,6 +8,7 @@ import { CategoriesPage } from "./pages/CategoriesPage";
 import { BudgetsPage } from "./pages/BudgetsPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { LoansPage } from "./pages/LoansPage";
 import { StockPage } from "./pages/StockPage";
 
 function App() {
@@ -27,6 +28,7 @@ function App() {
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/stocks" element={<StockPage />} />
+        <Route path="/loans" element={<LoansPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

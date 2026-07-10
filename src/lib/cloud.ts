@@ -51,9 +51,12 @@ export async function setInitialPassword(password: string): Promise<void> {
   });
 }
 
-// Alias for settings page
-// Store password in memory for subsequent API calls
-export function setPassword(pw: string) {
+// Update password on server and in memory
+export async function setPassword(pw: string): Promise<void> {
+  await api("/api/auth/setup", {
+    method: "POST",
+    body: JSON.stringify({ password: pw }),
+  });
   appPassword = pw;
 }
 
@@ -299,4 +302,141 @@ export async function getStockCompleted(group = "stock") {
 
 export async function getStockPortfolio() {
   return api("/api/stocks/portfolio");
+}
+
+
+// ===== Loan API =====
+
+let loanPassword = "";
+
+export function setLoanPassword(pw: string) {
+  loanPassword = pw;
+}
+
+async function loanApi(path: string, options?: RequestInit) {
+  const headers: Record<string, string> = {
+    "x-loan-password": loanPassword,
+  };
+  if (options?.body && !(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(getServerUrl() + path, {
+      ...options,
+      signal: controller.signal,
+      headers: { ...headers, ...(options?.headers as Record<string, string>) },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || "请求失败");
+    }
+    return res.json();
+  } catch (e: any) {
+    clearTimeout(timeout);
+    if (e.name === "AbortError") throw new Error("连接服务器超时，请检查网络");
+    throw e;
+  }
+}
+
+export async function hasLoanPassword(): Promise<boolean> {
+  const data = await loanApi("/api/loan/auth/check", { method: "POST" });
+  return data.hasPassword;
+}
+
+export async function setupLoanPassword(password: string): Promise<void> {
+  await loanApi("/api/loan/auth/setup", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+  loanPassword = password;
+}
+
+export async function verifyLoanPassword(password: string): Promise<boolean> {
+  try {
+    const res = await fetch(getServerUrl() + "/api/loan/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.ok) loanPassword = password;
+    return data.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getLoans(filters?: { status?: string; date_from?: string; date_to?: string; platform?: string }) {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.date_from) params.set("date_from", filters.date_from);
+  if (filters?.date_to) params.set("date_to", filters.date_to);
+  if (filters?.platform) params.set("platform", filters.platform);
+  const q = params.toString() ? "?" + params.toString() : "";
+  return loanApi("/api/loans" + q);
+}
+
+export async function addLoan(data: { platform: string; due_date: string; amount: number; note?: string }) {
+  return loanApi("/api/loans", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateLoan(id: string, data: Partial<{ platform: string; due_date: string; amount: number; note: string; status: string }>) {
+  return loanApi("/api/loans/" + id, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLoan(id: string) {
+  return loanApi("/api/loans/" + id, { method: "DELETE" });
+}
+
+export async function toggleLoanStatus(id: string) {
+  return loanApi("/api/loans/" + id + "/toggle", { method: "POST" });
+}
+
+export async function getLoanSetting(key: string): Promise<string> {
+  const data = await loanApi("/api/loan/settings/" + encodeURIComponent(key));
+  return data.value || "";
+}
+
+export async function setLoanSetting(key: string, value: string) {
+  return loanApi("/api/loan/settings/" + encodeURIComponent(key), {
+    method: "POST",
+    body: JSON.stringify({ value }),
+  });
+}
+
+export async function importLoans(file: File): Promise<number> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const data = await loanApi("/api/loans/import", {
+    method: "POST",
+    body: formData,
+  });
+  return data.count;
+}
+
+export async function exportLoans() {
+  const headers: Record<string, string> = { "x-loan-password": loanPassword };
+  const res = await fetch(getServerUrl() + "/api/loans/export", { headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || "导出失败");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "loans.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
 }

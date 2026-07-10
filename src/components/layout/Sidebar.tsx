@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard, ArrowRightLeft, Tags, PiggyBank, Wallet, Settings, TrendingUp,
+  LayoutDashboard, ArrowRightLeft, Tags, PiggyBank, Wallet, Settings, TrendingUp, DollarSign,
   Menu, X,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -12,6 +12,7 @@ const navItems = [
   { to: "/budgets", icon: PiggyBank, label: "预算" },
   { to: "/accounts", icon: Wallet, label: "账户" },
   { to: "/stocks", icon: TrendingUp, label: "股票" },
+  { to: "/loans", icon: DollarSign, label: "贷款" },
   { to: "/settings", icon: Settings, label: "设置" },
 ];
 
